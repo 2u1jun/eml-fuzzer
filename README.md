@@ -9,7 +9,7 @@
 `eml(x, y) = exp(x) − ln(y)`, combined with the constant `1`, can express every standard elementary function.
 
 This project turns that mathematical elegance into a weapon.  
-EML trees are **mathematically valid** yet structurally brutal — and depth-7 trees already cause SymPy's `simplify()` to hang indefinitely.
+EML trees are **mathematically valid** yet structurally brutal — depth-7 trees already cause SymPy's `simplify()` to hang indefinitely.
 
 ---
 
@@ -34,34 +34,104 @@ cd eml-fuzzer
 pip install sympy
 ```
 
-### Run the fuzzer
+---
+
+## Usage
+
+### Step 1 — Fuzz (`fuzzer.py`)
+
+Find bugs by hammering SymPy with random EML trees.
 
 ```bash
 # Basic run — 50 cases, depth 3~10, 5s timeout
 python fuzzer.py
 
-# Custom run
+# Crank it up
 python fuzzer.py -n 200 --min-depth 5 --max-depth 12 --timeout 8 --workers 4
 
-# Reproducible run with seed
+# Reproducible run
 python fuzzer.py -n 100 --seed 1337
 ```
+
+```
+╔══════════════════════════════════════╗
+║        EML CAS Fuzzer v0.1           ║
+║  Stress-testing SymPy with EML trees ║
+╚══════════════════════════════════════╝
+  cases    : 50
+  depth    : 3 ~ 10
+  timeout  : 5s per case
+  workers  : 4 (CPU has 8 cores)
+
+  💀 TIMEOUT      depth= 8  nodes= 111
+  💀 TIMEOUT      depth= 7  nodes=  99
+  🐢 SLOW         depth= 7  nodes=  87  simplify() took 2.55s
+  ── [ 50/50] done  bugs=8 ──
+```
+
+### Step 2 — Minimize (`minimizer.py`)
+
+Reduce a crashing tree to its **smallest possible reproducer**, then generate a  
+ready-to-paste GitHub issue report.
+
+```bash
+python minimizer.py
+```
+
+```
+Step 1: Finding a bug to minimize...
+
+Bug found: [timeout] depth=5 nodes=45
+
+Step 2: Minimizing...
+
+Minimizing [TIMEOUT]  start: depth=5  nodes=45
+  pass 1: 22 internal nodes to try
+    ✂  node 7 pruned  -> depth=5  nodes=43
+  pass 2: 21 internal nodes to try
+    ✂  node 8 pruned  -> depth=5  nodes=37
+  ...
+Minimization complete.
+  Original : depth=5  nodes=45
+  Minimized: depth=5  nodes=13
+  Reduction: 71.1%
+
+Step 3: GitHub issue draft
+============================================================
+## `simplify()` timeout on deeply nested exp/log expression
+
+**SymPy version:** `1.14.0`
+**Bug class:** `timeout`
+**Minimal tree:** depth=5, nodes=13
+
+### Minimal Reproducible Example
+
+from sympy import *
+x = exp(exp(exp(exp(exp(Integer(1)) - log(Integer(1))) - log(Integer(1))) \
+         - log(Integer(1))) - log(Integer(1))) \
+  - log(exp(Integer(1)) - log(Integer(1)))
+simplify(x)   # hangs / never returns
+============================================================
+```
+
+**The output is a complete GitHub issue draft.** Copy it directly to a SymPy issue report.
 
 ### Use as a library
 
 ```python
 from eml_tree import generate_batch
 from fuzzer import fuzz
+from minimizer import minimize, generate_issue_report
 
-result = fuzz(
-    count=200,
-    min_depth=4,
-    max_depth=12,
-    timeout_sec=5,
-    workers=4,        # parallel workers = CPU cores
-    seed=42,
-)
-print(result.summary())
+# 1. Find bugs
+result = fuzz(count=200, min_depth=4, max_depth=12, timeout_sec=5, workers=4)
+
+# 2. Minimize the first bug found
+if result.bugs:
+    from eml_tree import random_eml_tree
+    # re-run with seed to recover the crashing tree, then:
+    minimized = minimize(crashing_tree, result.bugs[0], timeout_sec=5)
+    print(generate_issue_report(minimized, result.bugs[0]))
 ```
 
 ---
@@ -87,39 +157,35 @@ depth=8, nodes=169 → SymPy simplify() timeout (confirmed)
 | `wrong_answer` | Numeric value ≠ symbolic result (differential testing) |
 | `crash` | Unexpected exception from SymPy |
 
-### 3. Multiprocessing
+### 3. Multiprocessing (`fuzzer.py`)
 
 Each test case runs in an **isolated subprocess**.  
-Timed-out workers are killed with `process.terminate()` — no SIGALRM, works on all OS.
+Timed-out workers are killed with `process.terminate()` — no SIGALRM, works on Linux, macOS, and Windows.
 
-```
-workers=4 → 4 EML trees attack SymPy simultaneously
-```
+### 4. Minimizer (`minimizer.py`)
+
+Greedy top-down delta-debugging: repeatedly replace subtrees with `Leaf(1)`,  
+keeping reductions that preserve the bug. Typically achieves **60–80% node reduction**.
 
 ---
 
-## Results so far
+## Results
 
 Running `python fuzzer.py -n 30 --max-depth 8 --seed 1337`:
 
 ```
-=======================================================
   Total cases  : 30
   Clean        : 22
-  Bugs found   : 8
-  Elapsed      : 31.3s
-=======================================================
+  Bugs found   : 8   (27% bug rate)
 
   [TIMEOUT] — 7 cases
-    depth= 7  nodes= 99   exceeded 5s limit
-    depth= 7  nodes=117   exceeded 5s limit
-    depth= 8  nodes=157   exceeded 5s limit
+    depth= 7  nodes= 99
+    depth= 7  nodes=117
+    depth= 8  nodes=157
 
   [SLOW] — 1 case
     depth= 7  nodes= 87   simplify() took 2.55s
 ```
-
-**27% bug rate at depth 7~8.** SymPy's simplify() cannot handle moderately deep EML trees.
 
 ---
 
@@ -129,6 +195,7 @@ Running `python fuzzer.py -n 30 --max-depth 8 --seed 1337`:
 eml-fuzzer/
 ├── eml_tree.py    # EML tree data structure + random generator
 ├── fuzzer.py      # CAS attack engine (multiprocessing)
+├── minimizer.py   # Delta-debugging minimizer + GitHub issue generator
 └── README.md
 ```
 
@@ -136,11 +203,8 @@ eml-fuzzer/
 
 ## CLI Reference
 
+**fuzzer.py**
 ```
-usage: fuzzer.py [-h] [-n COUNT] [--min-depth MIN_DEPTH] [--max-depth MAX_DEPTH]
-                 [--timeout TIMEOUT] [--workers WORKERS] [--seed SEED]
-
-options:
   -n, --count       Number of test cases (default: 50)
   --min-depth       Minimum tree depth (default: 3)
   --max-depth       Maximum tree depth (default: 10)
@@ -149,15 +213,21 @@ options:
   --seed            Random seed for reproducibility
 ```
 
+**minimizer.py**  
+Run directly — finds one bug, minimizes it, and prints a GitHub issue draft.
+
 ---
 
 ## Roadmap
 
-- [ ] SageMath / Mathematica support
-- [ ] Automatic SymPy issue report generation
-- [ ] RecursionError trigger at controlled depth
-- [ ] Minimizer: reduce crashing tree to smallest reproducer
-- [ ] CI integration for regression tracking
+- [x] Random EML tree generator
+- [x] Multiprocessing fuzzer with hard timeout
+- [x] Differential testing (numeric vs symbolic)
+- [x] Delta-debugging minimizer
+- [x] Automatic GitHub issue report generation
+- [ ] SageMath / Mathematica target support
+- [ ] Seed corpus for known slow patterns
+- [ ] CI regression tracking
 
 ---
 
