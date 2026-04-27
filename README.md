@@ -1,4 +1,4 @@
-# eml-fuzzer 🔨
+# eml-fuzzer 
 
 > **A fuzzer that attacks Computer Algebra Systems (CAS) using EML trees**
 
@@ -29,7 +29,7 @@ This makes random generation trivial while producing inputs that CAS engines hav
 ## Quickstart
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/eml-fuzzer
+git clone https://github.com/2u1jun/eml-fuzzer
 cd eml-fuzzer
 pip install sympy
 ```
@@ -224,10 +224,19 @@ Run directly — finds one bug, minimizes it, and prints a GitHub issue draft.
 - [x] Multiprocessing fuzzer with hard timeout
 - [x] Differential testing (numeric vs symbolic)
 - [x] Delta-debugging minimizer
-- [x] Automatic GitHub issue report generation
 - [ ] SageMath / Mathematica target support
 - [ ] Seed corpus for known slow patterns
 - [ ] CI regression tracking
+
+---
+
+## Filed Bugs
+
+Bugs discovered and reported using eml-fuzzer:
+
+| Date | Target | Issue | Status |
+|------|--------|-------|--------|
+| 2026-04-27 | SymPy 1.14.0 | [#29716 — `simplify()` hangs on deeply nested exp/log](https://github.com/sympy/sympy/issues/29716) | Open |
 
 ---
 
